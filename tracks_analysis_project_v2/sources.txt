@@ -1,0 +1,7 @@
+gpx.storage - open GPX storage
+
+openstreetmap.org - треки в GPX формате
+
+alltrails.com - можно парсить (с ограничениями)
+
+komoot.com - популярно у туристов

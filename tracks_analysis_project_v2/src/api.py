@@ -2,44 +2,76 @@ from flask import Flask, request, jsonify
 import joblib
 import numpy as np
 import pandas as pd
+from sqlalchemy import create_engine
 
 app = Flask(__name__)
 
-# Загружаем модели
+DB_URL = "postgresql://postgres:password@localhost:5432/tracks_db"
+engine = create_engine(DB_URL)
+
 kmeans_model = joblib.load('outputs/models/kmeans_model.pkl')
 scaler = joblib.load('outputs/models/scaler.pkl')
-feature_importance = joblib.load('outputs/models/feature_importance.pkl')
+ml_model = joblib.load('outputs/models/best_classifier.pkl')
+le = joblib.load('outputs/models/label_encoder.pkl')
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    """API для предсказания кластера трека"""
+@app.route('/predict_cluster', methods=['POST'])
+def predict_cluster():
     data = request.json
     
-    # Формируем признаки
     features = np.array([[
-        data.get('distance_km', 0),
-        data.get('elevation_gain', 0),
-        data.get('avg_temperature', 0),
-        data.get('osm_buildings', 0),
-        data.get('osm_water', 0),
-        data.get('precipitation', 0)
+        data['distance_km'],
+        data['elevation_gain'],
+        data['avg_temperature'],
+        data['osm_buildings'],
+        data['osm_water'],
+        data['precipitation']
     ]])
     
-    # Масштабируем
     features_scaled = scaler.transform(features)
-    
-    # Предсказываем кластер
     cluster = int(kmeans_model.predict(features_scaled)[0])
     
+    return jsonify({'cluster': cluster})
+
+@app.route('/predict_risk', methods=['POST'])
+def predict_risk():
+    data = request.json
+    
+    features = np.array([[
+        data['distance_km'],
+        data['elevation_gain'],
+        data['avg_slope'],
+        data['max_elevation'],
+        data['min_elevation'],
+        data['avg_elevation'],
+        data['osm_water'],
+        data['osm_buildings'],
+        data['osm_farmland'],
+        data['osm_forest'],
+        data['avg_temperature'],
+        data['max_temperature'],
+        data['min_temperature'],
+        data['precipitation']
+    ]])
+    
+    pred = ml_model.predict(features)[0]
+    risk = le.inverse_transform([pred])[0]
+    
+    return jsonify({'risk': risk})
+
+@app.route('/db_stats', methods=['GET'])
+def db_stats():
+    df = pd.read_sql("SELECT * FROM tracks", engine)
+    
     return jsonify({
-        'cluster': cluster,
-        'features_used': list(feature_importance['feature'].head(5)),
-        'message': f'Трек отнесен к кластеру {cluster}'
+        'tracks_count': len(df),
+        'avg_distance': float(df['distance_km'].mean()),
+        'avg_elevation': float(df['elevation_gain'].mean()),
+        'risk_distribution': df['risk_zone'].value_counts().to_dict()
     })
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'healthy'})
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
